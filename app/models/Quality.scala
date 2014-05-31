@@ -1,10 +1,12 @@
 package models
 
 case class Quality(
-  satisfied: Int,
-  total: Int,
+  value: Int,
+  // TODO : move to an enum or sealed object later
+  valueType: String,
   channel: String,
   criteria: String,
+  year: Int,
   domain: Option[String],
   place: Option[String])
 

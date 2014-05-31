@@ -4,9 +4,9 @@ import play.api._
 import play.api.mvc._
 import play.api.libs.concurrent.Execution.Implicits.defaultContext
 import play.api.libs.json._
+import play.api.Play.current
 import scala.concurrent.Future
 
-// Reactive Mongo imports
 import reactivemongo.api._
 
 // Reactive Mongo plugin, including the JSON-specialized collection
@@ -14,21 +14,12 @@ import play.modules.reactivemongo.MongoController
 import play.modules.reactivemongo.json.collection.JSONCollection
 
 /*
- * Example using ReactiveMongo + Play JSON library.
- *
- * There are two approaches demonstrated in this controller:
- * - using JsObjects directly
- * - using case classes that can be turned into Json using Reads and Writes.
- *
  * This controller uses case classes and their associated Reads/Writes
  * to read or write JSON structures.
  *
  * Instead of using the default Collection implementation (which interacts with
  * BSON structures + BSONReader/BSONWriter), we use a specialized
  * implementation that works with JsObject + Reads/Writes.
- *
- * Of course, you can still use the default Collection implementation
- * (BSONCollection.) See ReactiveMongo examples to learn how to use it.
  */
 object Application extends Controller with MongoController {
   /*
@@ -40,35 +31,45 @@ object Application extends Controller with MongoController {
    */
   def collection: JSONCollection = db.collection[JSONCollection]("qualities")
 
-  // ------------------------------------------ //
-  // Using case classes + Json Writes and Reads //
-  // ------------------------------------------ //
   import play.api.data.Form
   import models._
   import models.JsonFormats._
 
-  def create = Action.async {
-    val quality = Quality(10, 100, "Guichet", "Rapidité", None, Some("HdV"))
-    val futureResult = collection.insert(quality)
-    // when the insert is performed, send a OK 200 result
-    futureResult.map(_ => Ok)
-  }
+  def bootstrap = Action {
+    val data = io.Source.fromURL(Play.resource("/public/csv/VilleMTP_MTP_QVEnquete_2013_Services.csv").get).getLines
 
-  def createFromJson = Action.async(parse.json) { request =>
-    /*
-     * request.body is a JsValue.
-     * There is an implicit Writes that turns this JsValue as a JsObject,
-     * so you can call insert() with this JsValue.
-     * (insert() takes a JsObject as parameter, or anything that can be
-     * turned into a JsObject using a Writes.)
-     */
-    request.body.validate[Quality].map { user =>
-      // `quality` is an instance of the case class `models.Quality`
-      collection.insert(user).map { lastError =>
-        Logger.debug(s"Successfully inserted with LastError: $lastError")
-        Created
+    // get channels from the first row
+    // fill empty values with last known from the row
+    val channels = data.next().drop(1).split(",").toList.foldLeft(List[String] ())((b,a) =>
+      a match {
+        case "" => b.head :: b
+        case value => value :: b
+      }).reverse.toArray
+
+    // get criterias from the second row
+    val criterias = data.next().split(",")
+
+    data.drop(2).foreach { line =>
+      val splittedLine = line.split(",")
+      // guess value type from what is contained within label in the first cell
+      val valueType = splittedLine(0).contains("Total") match {
+        case true => "Total"
+        case false => "Insatisfied"
       }
-    }.getOrElse(Future.successful(BadRequest("invalid json")))
+      // year and domain are the first two values in the first cell
+      val year = splittedLine(0).split(" ")(0)
+      val domain = splittedLine(0).split(" ")(1)
+
+      // then go on through all non empty values in the row
+      for (i <- 1 to splittedLine.length - 1 if !splittedLine(i).isEmpty) {
+        // FIXME : try to have channels filled until the end of the row
+        //         for now, just take the last value if we are over the last one
+        val channel = if (channels.isDefinedAt(i - 1)) channels(i - 1) else channels.last
+        val quality = Quality(splittedLine(i).replace("%","").toInt, valueType, channel, criterias(i), year.toInt, Some(domain), None)
+        collection.insert(quality)
+      }
+    }
+    Ok
   }
 
   def findByChannel(channel: String) = Action.async {
@@ -91,18 +92,10 @@ object Application extends Controller with MongoController {
   }
 
   def findAll = Action.async {
-    // let's do our query
-    val cursor: Cursor[Quality] = collection.
-      // find all people with name `name`
-      find(Json.obj()).
-      // sort them by creation date
-      sort(Json.obj("created" -> -1)).
-      // perform the query and get a cursor of JsObject
-      cursor[Quality]
-
+    val cursor: Cursor[Quality] = 
+      collection.find(Json.obj()).sort(Json.obj("created" -> -1)).cursor[Quality]
     // gather all the JsObjects in a list
     val futureQualitiesList: Future[List[Quality]] = cursor.collect[List]()
-
     // everything's ok! Let's reply with the array
     futureQualitiesList.map { qualities =>
       Ok(qualities.toString)
