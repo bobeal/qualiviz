@@ -73,32 +73,51 @@ object Application extends Controller with MongoController {
   }
 
   def findByChannel(channel: String) = Action.async {
-    // let's do our query
-    val cursor: Cursor[Quality] = collection.
-      // find all people with name `name`
+    val cursor: Cursor[JsObject] = collection.
       find(Json.obj("channel" -> channel)).
-      // sort them by creation date
       sort(Json.obj("created" -> -1)).
-      // perform the query and get a cursor of JsObject
-      cursor[Quality]
+      cursor[JsObject]
 
-    // gather all the JsObjects in a list
-    val futureQualitiesList: Future[List[Quality]] = cursor.collect[List]()
-
-    // everything's ok! Let's reply with the array
-    futureQualitiesList.map { qualities =>
-      Ok(qualities.toString)
+    val futureQualitiesList: Future[List[JsObject]] = cursor.collect[List]()
+    val futureQualitiesArray: Future[JsArray] = futureQualitiesList.map { qualities =>
+      Json.arr(qualities) 
+    }
+    futureQualitiesArray.map { quality =>
+      Ok(quality)
     }
   }
 
   def findAll = Action.async {
-    val cursor: Cursor[Quality] = 
-      collection.find(Json.obj()).sort(Json.obj("created" -> -1)).cursor[Quality]
+    val cursor: Cursor[JsObject] = 
+      collection.find(Json.obj()).sort(Json.obj("created" -> -1)).cursor[JsObject]
     // gather all the JsObjects in a list
-    val futureQualitiesList: Future[List[Quality]] = cursor.collect[List]()
+    val futureQualitiesList: Future[List[JsObject]] = cursor.collect[List]()
     // everything's ok! Let's reply with the array
-    futureQualitiesList.map { qualities =>
-      Ok(qualities.toString)
+    val futureQualitiesArray: Future[JsArray] = futureQualitiesList.map { qualities =>
+      Json.arr(qualities)
+    }
+    futureQualitiesArray.map { qualities =>
+      Ok(qualities)
     }
   }
+
+  def testBarChart = Action { implicit request =>
+    Ok(views.html.testbarchart())
+  }
+
+  def testBarChartJson = Action.async {
+    val cursor: Cursor[JsObject] = collection.
+      find(Json.obj("year" -> 2013, "domain" -> "DUOP", "valueType" -> "Insatisfied")).
+      sort(Json.obj("channel" -> 1)).
+      cursor[JsObject]
+
+    val futureQualitiesList: Future[List[JsObject]] = cursor.collect[List]()
+    val futureQualitiesArray: Future[JsArray] = futureQualitiesList.map { qualities =>
+      Json.arr(qualities) 
+    }
+    futureQualitiesArray.map { quality =>
+      Ok(quality)
+    }
+  }
+
 }
